@@ -1,0 +1,17 @@
+[package]
+name = "clap-value-enum-catchall"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+clap = {version = "4", features = ["derive"] }
+proc-macro2 = { version = "1"}
+quote = { version = "1" }
+syn = { version = "2", features = ["full", "extra-traits"] }
+
+
+[dev-dependencies]
+uuid = { version = "1.4", features = ["v4"]}
