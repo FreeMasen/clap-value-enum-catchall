@@ -85,6 +85,7 @@ name = "clap-value-enum-catchall"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "heck",
  "proc-macro2",
  "quote",
  "syn",

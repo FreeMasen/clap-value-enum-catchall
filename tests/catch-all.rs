@@ -10,7 +10,9 @@ pub struct UuidArgs {
 }
 
 #[derive(Debug, Clone, ValueEnumCatchall)]
+#[catchall(rename_all = "kabob-case")]
 pub enum UuidEnum {
+    #[catchall(rename_all = "snake_case")]
     One,
     Two(Uuid),
 }

@@ -1,13 +1,91 @@
+use heck::{ToLowerCamelCase, ToUpperCamelCase, ToSnakeCase, ToKebabCase};
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span};
 use syn::{
     parse_macro_input,
     punctuated::Punctuated,
     token::{Bracket, Comma},
-    Data, DeriveInput, Expr, ExprArray, Fields, LitStr, Type, Variant,
+    Data, DeriveInput, Expr, ExprArray, Fields, LitStr, Type, Variant, Attribute, Token, parse::Parse, Meta,
 };
 
-#[proc_macro_derive(ValueEnumCatchall)]
+#[derive(Clone, Copy, Debug)]
+enum Casing {
+    Camel,
+    Kabob,
+    Snake,
+    Pascal,
+    Lower,
+    Upper,
+    ScreamingSnake,
+}
+
+impl Casing {
+    pub fn apply(self, s: &str) -> String {
+        
+        match self {
+            Self::Camel => s.to_lower_camel_case(),
+            Self::Pascal => s.to_upper_camel_case(),
+            Self::Snake => s.to_snake_case(),
+            Self::ScreamingSnake => s.to_snake_case().to_uppercase(),
+            Self::Kabob => s.to_kebab_case(),
+            Self::Lower => s.to_lowercase(),
+            Self::Upper => s.to_uppercase(),
+        }
+    }
+}
+#[derive(Debug)]
+struct Renamer {
+    _ident: Ident,
+    _punct: Token![=],
+    value: LitStr,
+}
+
+impl Parse for Renamer {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        Ok(Self {
+            _ident: input.parse()?,
+            _punct: input.parse()?,
+            value: input.parse()?
+        })
+    }
+}
+
+impl TryFrom<&[Attribute]> for Casing {
+    type Error = syn::Error;
+    fn try_from(value: &[Attribute]) -> Result<Self, Self::Error> {
+        for attr in value {
+            if let Ok(fits) = dbg!(Self::try_from(attr)) {
+                return Ok(fits);
+            }
+        }
+        Err(Self::Error::new(Span::call_site(), ""))
+    }
+}
+impl TryFrom<&Attribute> for Casing {
+    type Error = syn::Error;
+    fn try_from(value: &Attribute) -> Result<Self, Self::Error> {
+        let Meta::List(meta_info) = &value.meta else {
+            panic!("Unknown attribute")
+        };
+        assert_eq!(
+            meta_info.path.segments.last().map(|s| s.ident.to_string()).unwrap(),
+            "catchall",
+        );
+        let renamer: Renamer = dbg!(syn::parse2(meta_info.tokens.clone()))?;
+        Ok(match dbg!(renamer.value.value()).as_str() {
+            "kabob-case" => Casing::Kabob,
+            "camelCase" => Casing::Camel,
+            "PascalCase" => Casing::Pascal,
+            "snake_case" => Casing::Snake,
+            "SCREAMING_SNAKE_CASE" => Self::ScreamingSnake,
+            "lowercase" => Self::Lower,
+            "UPPERCASE" => Self::Upper,
+            value => return Err(Self::Error::new(Span::call_site(), format!("Unknown casing {value:?}"))),
+        })
+    }
+}
+
+#[proc_macro_derive(ValueEnumCatchall, attributes(catchall))]
 pub fn value_enum_catchall(tokens: TokenStream) -> TokenStream {
     let input: DeriveInput = parse_macro_input!(tokens);
     let parser_name = Ident::new(&format!("__{}Parser", input.ident), Span::call_site());
@@ -15,7 +93,7 @@ pub fn value_enum_catchall(tokens: TokenStream) -> TokenStream {
     let Data::Enum(input_data) = &input.data else {
         panic!("Cannot catchall structs")
     };
-    let (catchall_ty, variants) = lookup_variants_and_catchall(&input_data.variants);
+    let (catchall_ty, variants) = lookup_variants_and_catchall(&input_data.variants, &input.attrs);
     let value_parser =
         generate_typed_value_parser(&parser_name, &input.ident, &variants, catchall_ty);
     (quote::quote! {
@@ -30,15 +108,27 @@ pub fn value_enum_catchall(tokens: TokenStream) -> TokenStream {
 
 fn lookup_variants_and_catchall(
     variants: &Punctuated<Variant, Comma>,
+    attrs: &[Attribute]
 ) -> ((Type, Ident), Vec<(LitStr, Ident)>) {
     let mut ret_vars = Vec::new();
     let mut maybe_catchall = None;
+    let global_casing = Casing::try_from(attrs).ok();
     for var in variants {
         match &var.fields {
-            Fields::Unit => ret_vars.push((
-                LitStr::new(&var.ident.to_string(), Span::call_site()),
-                var.ident.clone(),
-            )),
+            Fields::Unit => {
+                let s = if let Ok(local_casing) = dbg!(Casing::try_from(var.attrs.as_slice())) {
+                    local_casing.apply(&var.ident.to_string())
+                } else if let Some(casing) = dbg!(&global_casing) {
+                    casing.apply(&var.ident.to_string())
+                } else {
+                    var.ident.to_string()
+                };
+
+                ret_vars.push((
+                    LitStr::new(dbg!(&s), Span::call_site()),
+                    var.ident.clone(),
+                ))
+            },
             Fields::Unnamed(unnamed) => {
                 if unnamed.unnamed.len() != 1 {
                     panic!("catchall variants can only have 1 unnamed field");

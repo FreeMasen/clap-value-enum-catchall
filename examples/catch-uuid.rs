@@ -16,6 +16,7 @@ pub enum UnitEnum {
 }
 
 #[derive(Debug, Clone, ValueEnumCatchall)]
+#[catchall(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UuidEnum {
     One,
     Two(Uuid),
